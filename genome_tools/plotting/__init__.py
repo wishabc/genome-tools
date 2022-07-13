@@ -615,11 +615,14 @@ def segment_plot(interval, segments, pad_points=1, ax=None, **kwargs):
     yaxis = kwargs.pop('yaxis', None)
 
     rectprops = {}
-    rectprops['color'] = 'k'
-    rectprops['edgecolor'] = 'none'
+    #rectprops['color'] = 'k'
+    #rectprops['edgecolor'] = 'none'
     # rectprops.update(kwargs)
 
     ax.set_xlim(interval.start, interval.end)
+
+
+    cmap = kwargs.pop('cmap', None)
 
     trans_left = ax.transData + mtransforms.ScaledTranslation(-1 * pad_points / 72., 0,  ax.figure.dpi_scale_trans)
     trans_right = ax.transData + mtransforms.ScaledTranslation(pad_points / 72., 0,  ax.figure.dpi_scale_trans)
@@ -631,10 +634,16 @@ def segment_plot(interval, segments, pad_points=1, ax=None, **kwargs):
     row_indices = pack_rows(segments, pad=pad_bp)
 
     patches = []
+
+    col_array = []
+
     for i, row_index in row_indices.items():
         patches.append(mpatches.Rectangle((i.start, row_index+0.3), i.end-i.start, 0.4, **rectprops))
+        col_array.append(i.score)
 
-    pc = mcollections.PatchCollection(patches, match_original=True)
+    pc = mcollections.PatchCollection(patches, match_original=True, cmap=cmap)
+    pc.set_array(np.array(col_array))
+    print(np.array(col_array))
     ax.add_collection(pc)
 
     ax.set_ylim(min(row_indices.values()), max(row_indices.values())+1)
@@ -645,6 +654,6 @@ def segment_plot(interval, segments, pad_points=1, ax=None, **kwargs):
 
     format_axes_to_interval(ax, interval, xaxis=xaxis, yaxis=yaxis)
 
-    return ax
+    return ax, pc
 
 # ------------------------

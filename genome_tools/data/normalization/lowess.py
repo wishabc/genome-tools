@@ -19,7 +19,7 @@ PEAK_OUTLIER_THRESHOLD = 0.999
 DELTA_FRACTION = 0.001
 CORRELATION_LIMIT = 0.8
 CV_FRACTION = 0.33
-SAMPLE_NUMBER = 75000 
+SAMPLE_NUMBER = 75_000 
 BIN_NUMBER = 100
 
 
@@ -36,7 +36,7 @@ def outlier_limit(x, threshold, k=SAMPLE_NUMBER):
 
     return expon(fitted[0],fitted[1]).ppf(1-(1-threshold)/len(x))
     
-def select_uniform(peaks, k=SAMPLE_NUMBER, bins=BIN_NUMBER, top_percentage=PEAK_OUTLIER_THRESHOLD,
+def select_peaks_uniform(peaks, k=SAMPLE_NUMBER, bins=BIN_NUMBER, top_percentage=PEAK_OUTLIER_THRESHOLD,
                 ignore=None, sample_method='raw'):
     """
     Returns row indicies to selected peaks
@@ -109,7 +109,7 @@ def return_interpolated(x, lowess_est, sampled):
     interpolated = extrapolate(interpolated, x.values, x.loc[sampled].values, lowess_est.loc[sampled].values)
     return pd.Series(interpolated, index=x.index)
 
-### choose smoothing parameter for loess by cross-validation
+### choose smoothing parameter for lowess by cross-validation
 def choose_fraction_cv(x, y, peaks, sampled, start=0.1, end=0.8, step=0.1, delta=None):
     """
     peaks:  peaks in x
@@ -156,80 +156,89 @@ def get_num_samples_per_peak(peaks_mat):
     """
     return peaks_mat.sum(axis=1)
 
-def scale_matrix(density_mat):
-    """
-    Returns the the density matrix scaled by the mean
-    """
-    sample_means = density_mat.mean(axis=0, skipna=True)
-    overall_mean = sample_means.mean()
- 
-    return density_mat.mul(overall_mean/sample_means, axis=1)
-
 def get_pseudocounts(x):
     """
     Compute pseudocounts for each sample in the matrix
     """
-    return x.apply(lambda x: x[x>0].min(), axis=0)
+    return x.apply(lambda x: x[x>0].min(skipna=True), axis=0)
 
-def get_geomean(density_mat, psuedocount=True):
+
+# def get_means(density_mat):
+#     """
+#     Returns the mean values across for each row (peaks) across columns (smaples)
+#     """
+#     return density_mat.mean(axis=1, skipna=True)
+
+
+# def get_geomeans(density_mat, psuedocount=True):
+#     """
+#     Return geometric mean for each row. We add a small
+#     pseudocount to each value to avoid buffer underruns.
+
+#     """
+#     if psuedocount:
+#         pseudocounts = get_pseudocounts(density_mat)
+#         gm_means = np.log(density_mat.add(pseudocounts, axis=1)).sum(axis=1)
+#     else:
+#         gm_means = np.log(density_mat).sum(axis=1)
+
+#     gm_means = gm_means / float(density_mat.shape[1])
+
+#     return np.exp(gm_means)
+
+
+def get_geomeans(density_mat, peaks_mat, peaks_only=True, psuedocount=True):
     """
-    Return geometric mean for each row. We add a small
-    pseudocount to each value to avoid buffer underruns.
-
-    """
-    if psuedocount:
-        pseudocounts = get_pseudocounts(density_mat)
-        gm_means = np.log(density_mat.add(pseudocounts, axis=1)).sum(axis=1)
-    else:
-        gm_means = np.log(density_mat).sum(axis=1)
-
-    gm_means = gm_means / float(density_mat.shape[1])
-
-    return np.exp(gm_means)
-
-def get_geomean_from_peaks(density_mat, peaks_mat):
-    """
+    pseudocount: bool
+        Add pseudocounts when computing mean
     """
     counts = peaks_mat.sum(axis=1)
 
-    censored_mat = density_mat.copy()
-    censored_mat[~peaks_mat] = np.nan
-    censored_mat[censored_mat==0] = np.nan
+    if peaks_only:
+        censored_mat = density_mat.copy()
+        censored_mat[~peaks_mat] = np.nan
+        censored_mat[censored_mat==0] = np.nan
+    else:
+        censored_mat = density_mat
 
-    gm_means = np.log(censored_mat).sum(axis=1, skipna=True)
+    pseudocounts = get_pseudocounts(censored_mat)
+
+    if psuedocount:
+        gm_means = np.log(censored_mat.add(pseudocounts, axis=1)).sum(axis=1, skipna=True)
+    else:
+        gm_means = np.log(censored_mat).sum(axis=1, skipna=True)
+
     gm_means = np.exp(gm_means * (1/counts))
     
-    return gm_means, counts
+    return gm_means, counts, pseudocounts
 
-def get_means(density_mat):
-    """
-    Returns the mean values across for each row (peaks) across columns (smaples)
-    """
-    return density_mat.mean(axis=1, skipna=True)
 
-def get_peak_subset(ref_peaks, num_samples_per_peak, density_mat, correlation_limit, min_peak_replication=0.3):
+def get_peak_subset(ref_peaks, num_samples_per_peak, density_mat, correlation_limit, min_peak_replication=0.25):
     """
     Select a subset of peaks well correlated to a reference (mean or geometric mean)
 
     Returns:
     --------
     Indicies for selected subset of peaks
+    
+    Add some debug logger messages 
     """
     
     n = num_samples_per_peak.max()
 
-    t = np.floor((np.linspace(.25, 1, 21)[:-1] * density_mat.shape[1]))
+    perc = np.linspace(0, 1, 21)[:-1]
+    i = np.where(perc >= min_peak_replication)[0]
+    thresholds = np.floor(perc[i] * density_mat.shape[1])
 
-    for i in tqdm(t, position=0):
+    for i in tqdm(thresholds , position=0):
         over = num_samples_per_peak>=i
         avg_cor = np.mean([spearmanr(ref_peaks[over], vals[over])[0]
-                    for samp, vals in tqdm(density_mat.iteritems(), total=density_mat.shape[1], position=1, leave=False)])
-        print(avg_cor)
+                    for samp, vals in density_mat.iteritems()])
         if avg_cor > correlation_limit:
             break
 
     if i == n:
-        print('Caution: individual samples may be poorly captured by mean!') # change to use logger
+        logger.warn('Caution: individual samples may be poorly captured by mean!') # change to use logger
 
     return num_samples_per_peak.index[num_samples_per_peak>=i]
 
@@ -237,14 +246,14 @@ def get_peak_subset(ref_peaks, num_samples_per_peak, density_mat, correlation_li
 def lowess_norm_pair(density1, density2, peaks1, peaks2, pseudocounts1, pseudocounts2, sampled_peaks):
     """
     """
+
+    ref_dens = np.log(density1 + pseudocounts1)
+    ref_peaks = peaks1[peaks1].index
     
-    diff = np.log(density2 + pseudocounts2) - np.log(density1 + pseudocounts1)
+    diff = np.log(density2 + pseudocounts2) - ref_dens 
     
     i = ((density1.loc[sampled_peaks]) > 0 & (density2.loc[sampled_peaks] > 0))
     sampled = i.index[i]
-
-    ref_dens = np.log(density1+pseudocounts1)
-    ref_peaks = peaks1[peaks1].index
 
     cv_fraction = choose_fraction_cv(ref_dens, diff, ref_peaks, sampled_peaks)
     
@@ -252,15 +261,19 @@ def lowess_norm_pair(density1, density2, peaks1, peaks2, pseudocounts1, pseudoco
                                    return_sorted=False, it=4, frac=cv_fraction)
     smoothed_diff_values = pd.Series(smoothed_diff_values, index=sampled)
 
-    interpolated2 = return_interpolated(ref_dens, smoothed_diff_values, sampled)
+    interpolated = return_interpolated(ref_dens, smoothed_diff_values, sampled)
 
-    return density2  / np.exp(interpolated2)
+    return density2  / np.exp(interpolated)
 
 
 def lowess_group_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER, 
                         sample_once=False, sample_method='raw', 
                         correlation_limit=CORRELATION_LIMIT):
     """
+
+    Normalizes all samples to a reference sample
+    Refererence sample is determined by sample with closest 'distance' to a sample created from the row geometric means
+
     Arguments
     ---------
     density_mat: pandas.DataFrame
@@ -270,24 +283,20 @@ def lowess_group_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER,
     N, S = density_mat.shape
 
     logger.info('Computing geometric mean for each peak')
-    gm_means, num_samples_per_peak = get_geomean_from_peaks(density_mat, peaks_mat)
-
-    pseudocounts = get_pseudocounts(density_mat)
+    # Note: Does NOT add psuedocounts before computing mean
+    peak_gm_means, num_samples_per_peak, pseudocounts = get_geomeans(density_mat, peaks_mat, psuedocount=False)
 
     logger.info('Computing sample distance to \'mean\' dataset')
-    dist = np.mean(np.square(density_mat.sub(gm_means, axis=0)), axis=0)
+    dist = np.mean(np.square(density_mat.sub(peak_gm_means, axis=0)), axis=0)
     ref_index = np.argsort(dist)[0]
-
 
     if sample_once:
         logger.info('Sampling peaks once')
 
-        decent_peaks = get_peak_subset(gm_means, num_samples_per_peak, density_mat, correlation_limit)
-        sampled_peaks = select_uniform(gm_means.loc[decent_peaks], k=sample_number,
+        decent_peaks = get_peak_subset(peak_gm_means, num_samples_per_peak, density_mat, correlation_limit)
+        sampled_peaks = select_peaks_uniform(peak_gm_means.loc[decent_peaks], k=sample_number,
                             top_percentage=PEAK_OUTLIER_THRESHOLD,
                             sample_method=sample_method)
-        sampled_peaks = decent_peaks.loc[sampled_peaks]
-
 
     normed = np.empty(density_mat.shape, dtype=float)
    
@@ -297,12 +306,12 @@ def lowess_group_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER,
         else:
             if not sample_once:
                 decent_peaks = peaks_mat.iloc[:,k] & peaks_mat.iloc[:, ref_index]
-                gm_means = np.exp(np.log(density_mat.iloc[:, k])/2. + np.log(density_mat.iloc[:, ref_index])/2.)
-                sampled_peaks = select_uniform(gm_means.loc[decent_peaks], k=sample_number,
+                decent_peak_gm_means = np.exp(np.log(density_mat.iloc[:, k])/2. + np.log(density_mat.iloc[:, ref_index])/2.)
+                sampled_peaks = select_peaks_uniform(decent_peak_gm_means.loc[decent_peaks], k=sample_number,
                                         top_percentage=PEAK_OUTLIER_THRESHOLD,
                                         sample_method=sample_method)
         
-        normed[:,k] = lowess_norm_pair(
+            normed[:,k] = lowess_norm_pair(
                             density_mat.iloc[:, ref_index], 
                             density_mat.iloc[:, k],
                             peaks_mat.iloc[:, ref_index],
@@ -310,82 +319,54 @@ def lowess_group_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER,
                             pseudocounts.iloc[ref_index],
                             pseudocounts.iloc[k],
                             sampled_peaks)                 
-
     
     return normed
 
 
-def loess_geomean_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER, 
-                       sample_method='random', correlation_limit=CORRELATION_LIMIT,
+def lowess_mean_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER, 
+                       sample_method='raw', correlation_limit=CORRELATION_LIMIT,
                        cv_number=5):
     """
+    Normalizes to the mean of of the dataset
+    Uses only well-correlated peaks to perform normalization
     """
 
     N, S = density_mat.shape
 
-    # numbers = get_peak_numbers(called_vectors)
     num_samples_per_peak = get_num_samples_per_peak(peaks_mat)
     
-    peak_means = get_means(density_mat)
+    logger.info('Computing mean and pseudoccounts for each peak')
+    pseudocounts = get_pseudocounts(density_mat)
     
-    #pseudocounts = {d:np.min(size_normed[d][size_normed[d]>0]) for d in size_normed}
-    # gm_pseudo = np.mean([pseudocounts[x] for x in pseudocounts])
+    mean_density = density_mat.mean(axis=1)
+    mean_pseudocount =  pseudocounts.mean()
 
-    pseudocounts = density_mat.apply(lambda x: x[x>0].min(), axis=0)
-    gm_pseudo = pseudocounts.mean()
-    
-    # decent_peaks = get_peak_subset(avg_values,numbers,size_normed,correlation_limit)
-    # sampled = select_uniform(avg_values[decent_peaks],number = sample_number,
-    #                     sample_method = sample_method)
+    xvalues = np.log(mean_density + mean_pseudocount)
+    diffs = np.log(density_mat.add(pseudocounts, axis=1)).sub(xvalues, axis=0)
 
-    decent_peaks = get_peak_subset(peak_means, num_samples_per_peak, density_mat, correlation_limit)
-
-    sampled_peaks = select_uniform(peak_means.loc[decent_peaks], number=sample_number,
+    logger.info(f'Sampling representative (well-correlated) peaks (r2>{correlation_limit}) to mean')
+    decent_peaks = get_peak_subset(mean_density, num_samples_per_peak, density_mat, correlation_limit)
+    sampled_peaks = select_peaks_uniform(mean_density.loc[decent_peaks], k=sample_number,
                             sample_method=sample_method)
 
+    logger.info(f'Found {len(decent_peaks):,} well-correlated peaks, using method "{sample_method}" and sampled {len(sampled_peaks):,} peaks')
 
-    # sampled = decent_peaks[sampled]
-    # xvalues = np.log(avg_values+gm_pseudo)
-
-    log_peak_means = np.log(peak_means + gm_pseudo)
-    delta = np.percentile(peak_means, 99) * DELTA_FRACTION
-
-    diffs = np.log(density_mat.add(pseudocounts, axis=1)).sub(log_peak_means, axis=0)
-    assert diffs.columns == density_mat.columns
-
-    # delta = np.percentile(avg_values,99)*DELTA_FRACTION
-    # difs = {k:np.log(size_normed[k]+pseudocounts[k])-np.log(avg_values+gm_pseudo) for 
-    #             k in size_normed}
-
-    ### don't need to cross validate so many times
-    
-
-    cv_set = SEED.choice(np.arange(N), size=min(cv_number, N), replace=False)
-    cv_fraction = np.mean([choose_fraction_cv(log_peak_means, diffs.iloc[:,i], sampled_peaks, delta=delta) 
+    logger.info('Computing LOWESS smoothing parameter via cross-validation')
+    delta = np.percentile(mean_density, 99) * DELTA_FRACTION
+    cv_set = SEED.choice(np.arange(S), size=min(cv_number, S), replace=False)
+    cv_fraction = np.mean([choose_fraction_cv(xvalues, diffs.iloc[:,i], xvalues.index, sampled_peaks, delta=delta) 
                     for i in cv_set])
-    
-    # cv_set = SEED.choice(size_normed.keys(),size = min(cv_number,len(size_normed.keys())),replace = False)
-    # cv_fraction = np.mean([choose_fraction_cv(xvalues,difs[k],sampled,delta = delta)
-    #                 for k in cv_set])
-    
+
+    logger.info(f'LOWESS parameters - delta = {delta}, frac = {cv_fraction}')
+
     normed = np.empty(density_mat.shape, dtype=float)
     for k in tqdm(range(S), desc='Normalizing samples'):
-        d = diffs.iloc[:,k]
+        smoothed_diff_values =  smoothers_lowess.lowess(diffs.iloc[:,k].loc[sampled_peaks], xvalues.loc[sampled_peaks],
+                                   return_sorted=False, it=4, frac=cv_fraction, delta=delta)
+        smoothed_diff_values = pd.Series(smoothed_diff_values, index=sampled_peaks)
 
-        smoothed_diff_values =  smoothers_lowess.lowess(d.loc[sampled_peaks], log_peak_means.loc[sampled_peaks],
-                                   return_sorted=False, it=4, frac=cv_fraction)
+        interpolated = return_interpolated(xvalues, smoothed_diff_values, sampled_peaks)
 
-        interpolated2 = return_interpolated(log_peak_means, smoothed_diff_values, sampled_peaks)
-
-        normed[:,k] = density_mat.iloc[:,k] / np.exp(interpolated2)
-
-    # normed_vectors = {}
-    # for k in size_normed:
-    #     dif = difs[k]
-    #     new_values = sm.lowess(dif[sampled],xvalues[sampled],
-    #                                    return_sorted=False, it=4, frac = cv_fraction,
-    #                                    delta = delta)
-    #     interpolated2 = return_interpolated(xvalues, new_values, sampled)
-    #     normed_vectors[k] =  size_normed[k]/np.exp(interpolated2)
+        normed[:,k] = density_mat.iloc[:,k] / np.exp(interpolated)
 
     return normed

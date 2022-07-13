@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 from .colors.cm import VOCAB_COLOR_MAPS
 
 # -----------------------------------------------------------------------
-#
-#
 # Code adoped from https://github.com/kundajelab/dragonn, (c) 2016 Kundaje Lab
 
 def standardize_polygons_str(data_str):
@@ -154,8 +152,20 @@ def add_letter_to_axis(ax, let, col, x, y, height):
         ax.add_patch(patch)
     return
 
+def one_hot_encode(seq):
+    one_hot_dict = {
+        'A': [1, 0, 0, 0],
+        'C': [0, 1, 0, 0],
+        'G': [0, 0, 1, 0],
+        'T': [0, 0, 0, 1],
+    }
+
+    return np.array(list(map(lambda x: one_hot_dict[x], seq)))
 
 def seq_plot(letter_heights, ax=None, vocab='dna', offset=0, **kwargs):
+
+    if type(letter_heights) == str and vocab == 'dna':
+        letter_heights = one_hot_encode(letter_heights)
 
     if not ax:
         ax = plt.gca()
