@@ -1,372 +1,339 @@
-from tqdm import tqdm
+import os
 
-import pandas as pd
 import numpy as np
-
-
-from scipy.stats import (expon, spearmanr)
+from numpy import ma
+from scipy.stats import expon, spearmanr
 from statsmodels.nonparametric import smoothers_lowess
-
+from convert_sparse import convert_to_sparse
+import datatable as dt
+import multiprocessing as mp
 import logging
-logging.basicConfig(level=logging.INFO)
+import sys
+import argparse
+
+handler = logging.StreamHandler(sys.stdout)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-SEED_NUMBER = 1832245
-SEED = np.random.RandomState(SEED_NUMBER)
-
-PEAK_OUTLIER_THRESHOLD = 0.999
-DELTA_FRACTION = 0.001
-CORRELATION_LIMIT = 0.8
-CV_FRACTION = 0.33
-SAMPLE_NUMBER = 75_000 
-BIN_NUMBER = 100
+formatter = logging.Formatter('%(asctime)s  %(levelname)s  %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
-def outlier_limit(x, threshold, k=SAMPLE_NUMBER):
-    """
-    """
+class DataNormalize:
+    def __init__(self,
+                 peak_outlier_threshold=0.999,
+                 delta_fraction=0.001,
+                 correlation_limit=0.8,
+                 cv_fraction=0.33,
+                 seed_number=1832245,
+                 sample_number=75000,
+                 bin_number=100,
+                 jobs=1,
+                 ):
+        self.seed = np.random.RandomState(seed_number)
 
-    if len(x) > k:
-        subset = x.sample(n=k, replace=False, random_state=SEED)
-    else:
-        subset = x
+        self.sample_number = sample_number
+        self.bin_number = bin_number
+        self.peak_outlier_threshold = peak_outlier_threshold
+        self.delta_fraction = delta_fraction
+        self.correlation_limit = correlation_limit
+        self.cv_fraction = cv_fraction
+        self.scale_factor = None
+        self.jobs = mp.cpu_count() if jobs == 0 else jobs
 
-    fitted = expon.fit(subset)
-
-    return expon(fitted[0],fitted[1]).ppf(1-(1-threshold)/len(x))
-    
-def select_peaks_uniform(peaks, k=SAMPLE_NUMBER, bins=BIN_NUMBER, top_percentage=PEAK_OUTLIER_THRESHOLD,
-                ignore=None, sample_method='raw'):
-    """
-    Returns row indicies to selected peaks
-    """
-    
-    if ignore is not None:
-        p = peaks.loc[peaks.index.difference(ignore)]
-    else:
-        p = peaks
-
-    if k > len(p):
-        k = len(p)
-
-    if sample_method == 'random':
-        return p.sample(n=min(len(p), k), replace=False, random_state=SEED).index
-        
-    if sample_method == 'log':
-        vls = np.log(p+1)
-    else:
-        max_value = outlier_limit(p, top_percentage, k=k)
-        keep = (p<max_value)
-        vls = p[keep]
-
-    bin_width= (vls.max() - vls.min())/float(bins)
-    bin_size = int(np.ceil(k/bins))
-    sampled_peaks_indicies = []
-
-    for i in np.arange(vls.min(), vls.max(), bin_width):
-        window_min = i
-        window_max = i + bin_width
-
-        window_peaks = vls[(vls>=window_min) & (vls<window_max)]
-
-        if len(window_peaks) == 0:
-            continue
-
-        sampled_window_peaks = window_peaks.sample(n=min(bin_size, len(window_peaks)), replace=False, random_state=SEED)
-        sampled_peaks_indicies = sampled_window_peaks.index.union(sampled_peaks_indicies)
-
-    return sampled_peaks_indicies    
-
-### sets the values out of the range to the edge values.  For 
-### logged data, equivalent to linear approximation between 0 and the point
-def extrapolate(interpolated, to_extrap, base, predict):
-    """
-    """
-
-    sample_order = np.argsort(base)
-    min_value = np.min(base)
-    max_value = np.max(base)
-    
-    under_min = np.where(to_extrap < min_value)[0]
-    over_max = np.where(to_extrap > max_value)[0]
-    
-    min_predict = predict[sample_order[0]]
-    max_predict = predict[sample_order[-1]]
-    
-    interpolated[under_min] = min_predict
-    interpolated[over_max] = max_predict
-
-    return interpolated
-
-def return_interpolated(x, lowess_est, sampled):
-    """
-    """
-    
-    # unique, unique_indices = np.unique(peaks[sample],return_index = True)
-
-    interpolated =  np.interp(x, x.loc[sampled], lowess_est.loc[sampled])
-    interpolated = extrapolate(interpolated, x.values, x.loc[sampled].values, lowess_est.loc[sampled].values)
-    return pd.Series(interpolated, index=x.index)
-
-### choose smoothing parameter for lowess by cross-validation
-def choose_fraction_cv(x, y, peaks, sampled, start=0.1, end=0.8, step=0.1, delta=None):
-    """
-    peaks:  peaks in x
-    sampled: 
-    """
-    
-    lo = x.loc[sampled].min()
-    hi = x.loc[sampled].max()
-
-    within_range = x[(x >= lo) & (x <= hi)].index.intersection(peaks)
-    cv_sample = within_range.difference(sampled)
-    
-    min_err = np.inf
-    best_frac = 0
-
-    if delta == None:
-        delta = DELTA_FRACTION * np.percentile(x, 99)
-    
-    for frac in np.arange(start, end+step, step):
-        
-        smoothed_values = smoothers_lowess.lowess(y.loc[sampled], x.loc[sampled],
-                                   return_sorted=False, it=4, frac=frac, delta=delta)
-        smoothed_values = pd.Series(smoothed_values, index=sampled)
-
-        interpolated = return_interpolated(x, smoothed_values, sampled)
-        
-        if pd.isna(interpolated.max()):
-            err = np.inf
+    def outlier_limit(self, x):
+        """
+        """
+        if x.count() > self.sample_number:
+            subset = self.sample_masked_array(x, size=self.sample_number)
         else:
-            err = ((interpolated.loc[cv_sample]-y.loc[cv_sample])**2).mean()
+            subset = x
 
-        if err < min_err:
-            min_err = err
-            best_frac = frac
-    
-    return best_frac
-        
+        fitted = expon.fit(subset)
 
-### normalize all peaks to the geometric mean
-### this might need some caution for widely divergent cell types / library sizes
-def get_num_samples_per_peak(peaks_mat):
-    """
-    Returns number of samples for each peak
-    """
-    return peaks_mat.sum(axis=1)
+        return expon(fitted[0], fitted[1]).ppf(1 - (1 - self.peak_outlier_threshold) / x.count())
 
-def get_pseudocounts(x):
-    """
-    Compute pseudocounts for each sample in the matrix
-    """
-    return x.apply(lambda x: x[x>0].min(skipna=True), axis=0)
+    def sample_masked_array(self, arr, size):
+        p = ~arr.mask
+        return self.seed.choice(np.arange(len(arr)), size=int(size),
+                                p=p / p.sum(),
+                                replace=False)
 
-
-# def get_means(density_mat):
-#     """
-#     Returns the mean values across for each row (peaks) across columns (smaples)
-#     """
-#     return density_mat.mean(axis=1, skipna=True)
-
-
-# def get_geomeans(density_mat, psuedocount=True):
-#     """
-#     Return geometric mean for each row. We add a small
-#     pseudocount to each value to avoid buffer underruns.
-
-#     """
-#     if psuedocount:
-#         pseudocounts = get_pseudocounts(density_mat)
-#         gm_means = np.log(density_mat.add(pseudocounts, axis=1)).sum(axis=1)
-#     else:
-#         gm_means = np.log(density_mat).sum(axis=1)
-
-#     gm_means = gm_means / float(density_mat.shape[1])
-
-#     return np.exp(gm_means)
-
-
-def get_geomeans(density_mat, peaks_mat, peaks_only=True, psuedocount=True):
-    """
-    pseudocount: bool
-        Add pseudocounts when computing mean
-    """
-    counts = peaks_mat.sum(axis=1)
-
-    if peaks_only:
-        censored_mat = density_mat.copy()
-        censored_mat[~peaks_mat] = np.nan
-        censored_mat[censored_mat==0] = np.nan
-    else:
-        censored_mat = density_mat
-
-    pseudocounts = get_pseudocounts(censored_mat)
-
-    if psuedocount:
-        gm_means = np.log(censored_mat.add(pseudocounts, axis=1)).sum(axis=1, skipna=True)
-    else:
-        gm_means = np.log(censored_mat).sum(axis=1, skipna=True)
-
-    gm_means = np.exp(gm_means * (1/counts))
-    
-    return gm_means, counts, pseudocounts
-
-
-def get_peak_subset(ref_peaks, num_samples_per_peak, density_mat, correlation_limit, min_peak_replication=0.25):
-    """
-    Select a subset of peaks well correlated to a reference (mean or geometric mean)
-
-    Returns:
-    --------
-    Indicies for selected subset of peaks
-    
-    Add some debug logger messages 
-    """
-    
-    n = num_samples_per_peak.max()
-
-    perc = np.linspace(0, 1, 21)[:-1]
-    i = np.where(perc >= min_peak_replication)[0]
-    thresholds = np.floor(perc[i] * density_mat.shape[1])
-
-    for i in tqdm(thresholds , position=0):
-        over = num_samples_per_peak>=i
-        avg_cor = np.mean([spearmanr(ref_peaks[over], vals[over])[0]
-                    for samp, vals in density_mat.iteritems()])
-        if avg_cor > correlation_limit:
-            break
-
-    if i == n:
-        logger.warn('Caution: individual samples may be poorly captured by mean!') # change to use logger
-
-    return num_samples_per_peak.index[num_samples_per_peak>=i]
-
-
-def lowess_norm_pair(density1, density2, peaks1, peaks2, pseudocounts1, pseudocounts2, sampled_peaks):
-    """
-    """
-
-    ref_dens = np.log(density1 + pseudocounts1)
-    ref_peaks = peaks1[peaks1].index
-    
-    diff = np.log(density2 + pseudocounts2) - ref_dens 
-    
-    i = ((density1.loc[sampled_peaks]) > 0 & (density2.loc[sampled_peaks] > 0))
-    sampled = i.index[i]
-
-    cv_fraction = choose_fraction_cv(ref_dens, diff, ref_peaks, sampled_peaks)
-    
-    smoothed_diff_values = smoothers_lowess.lowess(diff.loc[sampled], ref_dens.loc[sampled],
-                                   return_sorted=False, it=4, frac=cv_fraction)
-    smoothed_diff_values = pd.Series(smoothed_diff_values, index=sampled)
-
-    interpolated = return_interpolated(ref_dens, smoothed_diff_values, sampled)
-
-    return density2  / np.exp(interpolated)
-
-
-def lowess_group_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER, 
-                        sample_once=False, sample_method='raw', 
-                        correlation_limit=CORRELATION_LIMIT):
-    """
-
-    Normalizes all samples to a reference sample
-    Refererence sample is determined by sample with closest 'distance' to a sample created from the row geometric means
-
-    Arguments
-    ---------
-    density_mat: pandas.DataFrame
-    peaks_mat: pandas.DataFrame (bool)
-
-    """
-    N, S = density_mat.shape
-
-    logger.info('Computing geometric mean for each peak')
-    # Note: Does NOT add psuedocounts before computing mean
-    peak_gm_means, num_samples_per_peak, pseudocounts = get_geomeans(density_mat, peaks_mat, psuedocount=False)
-
-    logger.info('Computing sample distance to \'mean\' dataset')
-    dist = np.mean(np.square(density_mat.sub(peak_gm_means, axis=0)), axis=0)
-    ref_index = np.argsort(dist)[0]
-
-    if sample_once:
-        logger.info('Sampling peaks once')
-
-        decent_peaks = get_peak_subset(peak_gm_means, num_samples_per_peak, density_mat, correlation_limit)
-        sampled_peaks = select_peaks_uniform(peak_gm_means.loc[decent_peaks], k=sample_number,
-                            top_percentage=PEAK_OUTLIER_THRESHOLD,
-                            sample_method=sample_method)
-
-    normed = np.empty(density_mat.shape, dtype=float)
-   
-    for k in tqdm(range(S), desc='Normalizing samples'):
-        if k == ref_index:
-            normed[:,k] = density_mat.iloc[:,k]
+    def select_peaks_uniform(self, peaks, decent_indices, ignore=None, sample_method='raw'):
+        """
+        Returns row indices of selected peaks
+        """
+        if ignore is not None:
+            peaks_mask = decent_indices & ~ignore
         else:
-            if not sample_once:
-                decent_peaks = peaks_mat.iloc[:,k] & peaks_mat.iloc[:, ref_index]
-                decent_peak_gm_means = np.exp(np.log(density_mat.iloc[:, k])/2. + np.log(density_mat.iloc[:, ref_index])/2.)
-                sampled_peaks = select_peaks_uniform(decent_peak_gm_means.loc[decent_peaks], k=sample_number,
-                                        top_percentage=PEAK_OUTLIER_THRESHOLD,
-                                        sample_method=sample_method)
-        
-            normed[:,k] = lowess_norm_pair(
-                            density_mat.iloc[:, ref_index], 
-                            density_mat.iloc[:, k],
-                            peaks_mat.iloc[:, ref_index],
-                            peaks_mat.iloc[:, k],
-                            pseudocounts.iloc[ref_index],
-                            pseudocounts.iloc[k],
-                            sampled_peaks)                 
-    
-    return normed
+            peaks_mask = decent_indices
+
+        masked_peaks = ma.masked_array(peaks, ~peaks_mask)
+        k = min(self.sample_number, masked_peaks.count())
+
+        if sample_method == 'random':
+            result = self.sample_masked_array(masked_peaks, k)
+        else:
+            if sample_method == 'log':
+                vls = np.log(masked_peaks + 1)
+            elif sample_method == 'raw':
+                max_value = self.outlier_limit(masked_peaks)
+                new_mask = ~masked_peaks.mask & (masked_peaks < max_value)
+                vls = ma.masked_where(~new_mask, masked_peaks)
+            else:
+                raise ValueError('Method not in (random, log, raw)')
+            bin_width = (vls.max() - vls.min()) / self.bin_number
+            bin_size = np.ceil(k / self.bin_number)
+            sampled_peaks_indicies = []
+
+            for i in np.arange(vls.min(), vls.max(), bin_width):
+                window_min = i
+                window_max = i + bin_width
+                new_mask = ~vls.mask & ((vls >= window_min) & (vls < window_max))
+                window_peaks = ma.masked_where(~new_mask, vls)
+
+                if window_peaks.count() == 0:
+                    continue
+                sampled_window_peaks_indicies = self.sample_masked_array(window_peaks,
+                                                                         size=min(bin_size, window_peaks.count()))
+
+                sampled_peaks_indicies.append(sampled_window_peaks_indicies)
+
+            result = np.unique(np.concatenate(sampled_peaks_indicies))
+        # Convert to mask
+        res = np.zeros(peaks.shape, dtype=bool)
+        res[result] = True
+        return res
+
+    @staticmethod
+    def extrapolate(interpolated, to_extrap, base, predict):
+        """
+        Sets the values out of the range to the edge values.
+        For logged data, equivalent to linear approximation between 0 and the point
+        """
+
+        sample_order = np.argsort(base)
+        min_value = np.min(base)
+        max_value = np.max(base)
+
+        under_min = np.where(to_extrap < min_value)[0]
+        over_max = np.where(to_extrap > max_value)[0]
+
+        min_predict = predict[sample_order[0]]
+        max_predict = predict[sample_order[-1]]
+
+        interpolated[under_min] = min_predict
+        interpolated[over_max] = max_predict
+
+        return interpolated
+
+    def get_extrapolation(self, x, lowess_est, sampled):
+        """
+        """
+        interpolated = np.interp(x, x[sampled], lowess_est)
+        extrapolated = self.extrapolate(interpolated, x, x[sampled], lowess_est)
+        return extrapolated
+
+    def fit_and_extrapolate(self, y, x, sampled, frac, delta):
+        smoothed_values = smoothers_lowess.lowess(y[sampled], x[sampled],
+                                                  return_sorted=False, it=4,
+                                                  frac=frac, delta=delta)
+        return self.get_extrapolation(x, smoothed_values, sampled)
+
+    def choose_fraction_cv(self, y, x, sampled, start=0.1, end=0.8, step=0.1, delta=None):
+        """
+        choose smoothing parameter for lowess by cross-validation
+        sampled:
+        """
+
+        lo = x[sampled].min()
+        hi = x[sampled].max()
+
+        within_range_indexes = (x >= lo) & (x <= hi)
+        cv_sample = within_range_indexes & ~sampled
+
+        min_err = np.inf
+        best_frac = 0
+
+        for frac in np.arange(start, end + step, step):
+            interpolated = self.fit_and_extrapolate(y, x, sampled, frac, delta)
+
+            if np.isnan(interpolated.max()):
+                err = np.inf
+            else:
+                err = np.power(interpolated[cv_sample] - y[cv_sample], 2).mean()
+
+            if err < min_err:
+                min_err = err
+                best_frac = frac
+
+        return best_frac
+
+    @staticmethod
+    def get_num_samples_per_peak(matrix):
+        """
+        Returns number of samples for each peak
+        """
+        return matrix.sum(axis=1)
+
+    @staticmethod
+    def get_pseudocounts(matrix):
+        """
+        Compute pseudocounts for each sample in the matrix
+        """
+        masked_matrix = ma.masked_equal(matrix, 0.0, copy=False)
+        return np.nanmin(masked_matrix, axis=1)
+
+    def get_peak_subset(self, ref_peaks, num_samples_per_peak: np.ndarray, density_mat, correlation_limit,
+                        min_peak_replication=0.25) -> np.ndarray:
+        """
+        Select a subset of peaks well correlated to a reference (mean or geometric mean)
+
+        Returns:
+        --------
+        Indices for selected subset of peaks
+        """
+
+        n = np.max(num_samples_per_peak)
+
+        perc = np.linspace(0, 1, 21)[:-1]
+        i = np.where(perc >= min_peak_replication)[0]
+        thresholds = np.floor(perc[i] * density_mat.shape[1])
+
+        for i in thresholds:
+            over = num_samples_per_peak >= i
+            correlations = self.parallel_apply(
+                lambda x: spearmanr(ref_peaks[over], x[over]),
+                axis=0, arr=density_mat)[0]
+            avg_cor = np.mean(correlations)
+            if avg_cor > correlation_limit:
+                break
+
+        if i == n:
+            logger.warning('Caution: individual samples may be poorly captured by mean!')
+
+        return num_samples_per_peak >= i
+
+    @staticmethod
+    def apply_args_kwargs(fn, *args, **kwargs):
+        return lambda x: fn(x, *args, **kwargs)
+
+    def parallel_apply(self, func1d, axis, arr, *args, **kwargs):
+        """
+        Parallel version of apply_along_axis()
+        """
+        effective_axis = axis
+        if effective_axis != axis:
+            arr = arr.swapaxes(axis, effective_axis)
+        jobs = min(self.jobs, len(arr))
+        if jobs > 1:
+            split_arrays = [sub_arr
+                            for sub_arr in np.array_split(arr, jobs)]
+
+            ctx = mp.get_context('fork-sever')
+            with ctx.Pool(jobs) as p:
+                func = self.apply_args_kwargs(func1d, *args, **kwargs)
+                individual_results = p.starmap(func, split_arrays)
+            return np.concatenate(individual_results)
+        else:
+            return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
+
+    def lowess_normalize(self, density_mat: np.ndarray, peaks_mat: np.ndarray, cv_numer: int = 5, sample_method='raw'):
+        """
+        Normalizes to the mean of of the dataset
+        Uses only well-correlated peaks to perform normalization
+        """
+        N, S = density_mat.shape
+        logger.info(f'Normalizing matrix with shape: {N:,};{S}')
+        num_samples_per_peak = self.get_num_samples_per_peak(peaks_mat)
+
+        logger.info('Computing mean and pseudocounts for each peak')
+        pseudocounts = self.get_pseudocounts(density_mat)
+
+        mean_density = density_mat.mean(axis=1)
+        mean_pseudocount = pseudocounts.mean()
+        xvalues = np.log(mean_density + mean_pseudocount)
+        mat_and_pseudo = np.log(density_mat.transpose() + pseudocounts)
+        diffs = (mat_and_pseudo - xvalues).transpose()
+
+        logger.info(f'Sampling representative (well-correlated) peaks (r2>{self.correlation_limit}) to mean')
+        decent_peaks_mask = self.get_peak_subset(mean_density, num_samples_per_peak, density_mat,
+                                                 correlation_limit=self.correlation_limit)
+        sampled_peaks_mask = self.select_peaks_uniform(mean_density, decent_peaks_mask,
+                                                       sample_method=sample_method)
+
+        logger.info(
+            f'Found {decent_peaks_mask.sum():,} well-correlated peaks, using method "{sample_method}"'
+            f' and sampled {sampled_peaks_mask.sum():,} peaks')
+
+        logger.info('Computing LOWESS smoothing parameter via cross-validation')
+        delta = np.percentile(mean_density, 99) * self.delta_fraction
+        cv_set = self.seed.choice(np.arange(S), size=min(cv_numer, S), replace=False)
+        cv_fraction = float(
+            np.mean([self.choose_fraction_cv(y=diffs[:, i], x=xvalues, sampled=sampled_peaks_mask, delta=delta)
+                     for i in cv_set]))
+
+        logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
+
+        norm = self.parallel_apply(self.fit_and_extrapolate, axis=0,
+                                   arr=diffs, x=xvalues, sampled=sampled_peaks_mask,
+                                   delta=delta, frac=cv_fraction)
+
+        logger.info('Normalizing finished')
+        return density_mat / np.exp(norm)
+
+    @staticmethod
+    def get_scale_factor(matrix):
+        return 1. / (matrix.sum(axis=0) * 2 / 1.e5)
 
 
-def lowess_mean_norm(density_mat, peaks_mat, sample_number=SAMPLE_NUMBER, 
-                       sample_method='raw', correlation_limit=CORRELATION_LIMIT,
-                       cv_number=5):
-    """
-    Normalizes to the mean of of the dataset
-    Uses only well-correlated peaks to perform normalization
-    """
+def check_and_open_matrix_file(path, outpath):
+    if not os.path.exists(path):
+        raise ValueError(f'{path} do not exist')
+    base_path, ext = os.path.splitext(path)
+    if ext == 'npy':
+        return np.load(path)
+    else:
+        np_arr = dt.fread(path, header=False).to_numpy()
+        np_arr.save(outpath, np_arr)
+        return np_arr
 
-    N, S = density_mat.shape
 
-    num_samples_per_peak = get_num_samples_per_peak(peaks_mat)
-    
-    logger.info('Computing mean and pseudoccounts for each peak')
-    pseudocounts = get_pseudocounts(density_mat)
-    
-    mean_density = density_mat.mean(axis=1)
-    mean_pseudocount =  pseudocounts.mean()
+def make_out_path(outdir, prefix, matrix_type='signal', mode='sparse'):
+    basename = os.path.join(outdir, f'{prefix}.{matrix_type}')
+    if mode == 'sparse':
+        return basename + '.npz'
+    elif mode == 'numpy':
+        return basename + '.npy'
+    elif mode == 'txt':
+        return basename + '.txt'
+    else:
+        raise ValueError(f'Mode {mode} not in (sparse, numpy, txt)')
 
-    xvalues = np.log(mean_density + mean_pseudocount)
-    diffs = np.log(density_mat.add(pseudocounts, axis=1)).sub(xvalues, axis=0)
 
-    logger.info(f'Sampling representative (well-correlated) peaks (r2>{correlation_limit}) to mean')
-    decent_peaks = get_peak_subset(mean_density, num_samples_per_peak, density_mat, correlation_limit)
-    sampled_peaks = select_peaks_uniform(mean_density.loc[decent_peaks], k=sample_number,
-                            sample_method=sample_method)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Matrix normalization using lowess')
+    parser.add_argument('peak-matrix', help='Path to binary peaks matrix')
+    parser.add_argument('signal-matrix', help='Path to matrix with read counts for each peak in every sample')
+    parser.add_argument('output', help='Path to directory to save normalized matrix into.')
+    parser.add_argument('--prefix', help='Filenames prefix', default='matrix')
+    parser.add_argument('--jobs', type=int,
+                        help='Number of jobs to parallelize calculations '
+                             '(can\'t be larger than number of samples. If 0 is provided - uses all available cores')
+    p_args = parser.parse_args()
 
-    logger.info(f'Found {len(decent_peaks):,} well-correlated peaks, using method "{sample_method}" and sampled {len(sampled_peaks):,} peaks')
+    dens_outpath = make_out_path(p_args.output, p_args.prefix, 'signal', 'numpy')
+    peaks_outpath = make_out_path(p_args.output, p_args.prefix, 'bin', 'numpy')
 
-    logger.info('Computing LOWESS smoothing parameter via cross-validation')
-    delta = np.percentile(mean_density, 99) * DELTA_FRACTION
-    cv_set = SEED.choice(np.arange(S), size=min(cv_number, S), replace=False)
-    cv_fraction = np.mean([choose_fraction_cv(xvalues, diffs.iloc[:,i], xvalues.index, sampled_peaks, delta=delta) 
-                    for i in cv_set])
+    logger.info('Reading matrices')
+    density_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
+    peaks_matrix = check_and_open_matrix_file(p_args.peak_matrix, peaks_outpath)
 
-    logger.info(f'LOWESS parameters - delta = {delta}, frac = {cv_fraction}')
-
-    normed = np.empty(density_mat.shape, dtype=float)
-    for k in tqdm(range(S), desc='Normalizing samples'):
-        smoothed_diff_values =  smoothers_lowess.lowess(diffs.iloc[:,k].loc[sampled_peaks], xvalues.loc[sampled_peaks],
-                                   return_sorted=False, it=4, frac=cv_fraction, delta=delta)
-        smoothed_diff_values = pd.Series(smoothed_diff_values, index=sampled_peaks)
-
-        interpolated = return_interpolated(xvalues, smoothed_diff_values, sampled_peaks)
-
-        normed[:,k] = density_mat.iloc[:,k] / np.exp(interpolated)
-
-    return normed
+    data_norm = DataNormalize()
+    scale_factors = data_norm.get_scale_factor(density_matrix)
+    density_matrix = density_matrix * scale_factors
+    normalized_density_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
+    r = normalized_density_matrix / scale_factors.mean()
+    logger.info('Saving results')
+    np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normalized', 'txt'), r, delimiter='\t')
+    convert_to_sparse(r, make_out_path(p_args.output, p_args.prefix, 'normalized', 'sparse'))
