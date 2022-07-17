@@ -295,7 +295,7 @@ def check_and_open_matrix_file(path, outpath):
         return np.load(path)
     else:
         np_arr = dt.fread(path, header=False).to_numpy()
-        np_arr.save(outpath, np_arr)
+        np.save(outpath, np_arr)
         return np_arr
 
 
@@ -313,8 +313,8 @@ def make_out_path(outdir, prefix, matrix_type='signal', mode='sparse'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Matrix normalization using lowess')
-    parser.add_argument('peak-matrix', help='Path to binary peaks matrix')
-    parser.add_argument('signal-matrix', help='Path to matrix with read counts for each peak in every sample')
+    parser.add_argument('peak_matrix', help='Path to binary peaks matrix')
+    parser.add_argument('signal_matrix', help='Path to matrix with read counts for each peak in every sample')
     parser.add_argument('output', help='Path to directory to save normalized matrix into.')
     parser.add_argument('--prefix', help='Filenames prefix', default='matrix')
     parser.add_argument('--jobs', type=int,
