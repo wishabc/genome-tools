@@ -291,7 +291,7 @@ def check_and_open_matrix_file(path, outpath):
     if not os.path.exists(path):
         raise ValueError(f'{path} do not exist')
     base_path, ext = os.path.splitext(path)
-    if ext == 'npy':
+    if ext == '.npy':
         return np.load(path)
     else:
         np_arr = dt.fread(path, header=False).to_numpy()
