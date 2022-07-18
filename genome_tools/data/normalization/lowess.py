@@ -221,11 +221,9 @@ class DataNormalize:
         """
         other_axis = 1 if axis == 0 else 0
         jobs = min(self.jobs, arr.shape[other_axis])
-        print(self.jobs, arr.shape[other_axis])
         if jobs > 1:
             split_arrays = np.array_split(arr, jobs, axis=other_axis)
-            print([x.shape for x in split_arrays])
-            ctx = mp.get_context('fork-sever')
+            ctx = mp.get_context('fork-server')
             with ctx.Pool(jobs) as p:
                 individual_results = p.starmap(lambda x: np.apply_along_axis(func1d, axis, x, *args, **kwargs),
                                                split_arrays)
@@ -265,8 +263,6 @@ class DataNormalize:
         logger.info('Computing LOWESS smoothing parameter via cross-validation')
         delta = np.percentile(mean_density, 99) * self.delta_fraction
         cv_set = self.seed.choice(S, size=min(cv_numer, S), replace=False)
-        print(cv_set)
-        print(diffs[:cv_set])
         cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
                                                      arr=diffs[:cv_set], x=xvalues,
                                                      sampled=sampled_peaks_mask, deta=delta))
@@ -326,7 +322,6 @@ if __name__ == '__main__':
     logger.info('Reading matrices')
     counts_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
     peaks_matrix = check_and_open_matrix_file(p_args.peak_matrix, peaks_outpath)
-    print('Jobs', p_args.jobs)
     data_norm = DataNormalize(jobs=p_args.jobs)
     scale_factors = data_norm.get_scale_factor(counts_matrix)
     density_matrix = counts_matrix * scale_factors
