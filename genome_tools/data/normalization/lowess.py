@@ -214,27 +214,18 @@ class DataNormalize:
 
         return num_samples_per_peak >= i
 
-    @staticmethod
-    def apply_args_kwargs(fn, *args, **kwargs):
-        return lambda x: fn(x, *args, **kwargs)
-
     def parallel_apply_2D(self, func1d, axis, arr, *args, **kwargs):
-        # FIXME
         """
         Parallel version of apply_along_axis() for 2D matrices
         """
-        effective_axis = axis
-        if effective_axis != axis:
-            arr = arr.swapaxes(axis, effective_axis)
-        jobs = min(self.jobs, len(arr))
+        other_axis = 1 if axis == 0 else 0
+        jobs = min(self.jobs, arr.shape[other_axis])
         if jobs > 1:
-            split_arrays = [sub_arr
-                            for sub_arr in np.array_split(arr, jobs)]
+            split_arrays = np.array_split(arr, jobs, axis=other_axis)
 
             ctx = mp.get_context('fork-sever')
             with ctx.Pool(jobs) as p:
-                func = self.apply_args_kwargs(func1d, *args, **kwargs)
-                individual_results = p.starmap(func, split_arrays)
+                individual_results = p.starmap(np.apply_along_axis(func1d, axis, arr, *args, **kwargs), split_arrays)
             return np.concatenate(individual_results)
         else:
             return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
