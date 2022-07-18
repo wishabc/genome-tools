@@ -39,6 +39,7 @@ class DataNormalize:
         self.correlation_limit = correlation_limit
         self.cv_fraction = cv_fraction
         self.scale_factor = None
+        print(jobs)
         self.jobs = mp.cpu_count() if jobs == 0 else jobs
 
     def outlier_limit(self, x):
@@ -325,12 +326,12 @@ if __name__ == '__main__':
     logger.info('Reading matrices')
     counts_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
     peaks_matrix = check_and_open_matrix_file(p_args.peak_matrix, peaks_outpath)
-
+    print('Jobs', p_args.jobs)
     data_norm = DataNormalize(jobs=p_args.jobs)
     scale_factors = data_norm.get_scale_factor(counts_matrix)
     density_matrix = counts_matrix * scale_factors
     normalizing_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
-    r = counts_matrix / normalizing_matrix
+    r = counts_matrix / normalizing_matrix * scale_factors.mean()
     logger.info('Saving results')
     np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normalized', 'txt'), r, delimiter='\t')
     convert_to_sparse(r, make_out_path(p_args.output, p_args.prefix, 'normalized', 'sparse'))
