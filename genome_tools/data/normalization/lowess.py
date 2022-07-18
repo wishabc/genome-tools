@@ -202,7 +202,7 @@ class DataNormalize:
 
         for i in thresholds:
             over = num_samples_per_peak >= i
-            correlations = self.parallel_apply(
+            correlations = self.parallel_apply_2D(
                 lambda x: spearmanr(ref_peaks[over], x[over]),
                 axis=0, arr=density_mat)[0]
             avg_cor = np.mean(correlations)
@@ -218,9 +218,10 @@ class DataNormalize:
     def apply_args_kwargs(fn, *args, **kwargs):
         return lambda x: fn(x, *args, **kwargs)
 
-    def parallel_apply(self, func1d, axis, arr, *args, **kwargs):
+    def parallel_apply_2D(self, func1d, axis, arr, *args, **kwargs):
+        # FIXME
         """
-        Parallel version of apply_along_axis()
+        Parallel version of apply_along_axis() for 2D matrices
         """
         effective_axis = axis
         if effective_axis != axis:
@@ -275,9 +276,9 @@ class DataNormalize:
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
-        norm = self.parallel_apply(self.fit_and_extrapolate, axis=0,
-                                   arr=diffs, x=xvalues, sampled=sampled_peaks_mask,
-                                   delta=delta, frac=cv_fraction)
+        norm = self.parallel_apply_2D(self.fit_and_extrapolate, axis=0,
+                                      arr=diffs, x=xvalues, sampled=sampled_peaks_mask,
+                                      delta=delta, frac=cv_fraction)
 
         logger.info('Normalizing finished')
         return density_mat / np.exp(norm)
