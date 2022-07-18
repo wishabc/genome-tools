@@ -261,9 +261,11 @@ class DataNormalize:
         logger.info('Computing LOWESS smoothing parameter via cross-validation')
         delta = np.percentile(mean_density, 99) * self.delta_fraction
         cv_set = self.seed.choice(np.arange(S), size=min(cv_numer, S), replace=False)
+
         cv_fraction = float(
-            np.mean([self.choose_fraction_cv(y=diffs[:, i], x=xvalues, sampled=sampled_peaks_mask, delta=delta)
-                     for i in cv_set]))
+            np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
+                                           arr=diffs[:cv_set], x=xvalues,
+                                           sampled=sampled_peaks_mask, deta=delta)))
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
@@ -272,7 +274,7 @@ class DataNormalize:
                                       delta=delta, frac=cv_fraction)
 
         logger.info('Normalizing finished')
-        return density_mat / np.exp(norm)
+        return np.exp(norm)
 
     @staticmethod
     def get_scale_factor(matrix):
@@ -318,14 +320,14 @@ if __name__ == '__main__':
     peaks_outpath = make_out_path(p_args.output, p_args.prefix, 'bin', 'numpy')
 
     logger.info('Reading matrices')
-    density_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
+    counts_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
     peaks_matrix = check_and_open_matrix_file(p_args.peak_matrix, peaks_outpath)
 
     data_norm = DataNormalize()
-    scale_factors = data_norm.get_scale_factor(density_matrix)
-    density_matrix = density_matrix * scale_factors
-    normalized_density_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
-    r = normalized_density_matrix / scale_factors.mean()
+    scale_factors = data_norm.get_scale_factor(counts_matrix)
+    density_matrix = counts_matrix * scale_factors
+    normalizing_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
+    r = counts_matrix / normalizing_matrix
     logger.info('Saving results')
     np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normalized', 'txt'), r, delimiter='\t')
     convert_to_sparse(r, make_out_path(p_args.output, p_args.prefix, 'normalized', 'sparse'))
