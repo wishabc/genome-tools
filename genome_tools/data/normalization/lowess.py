@@ -226,7 +226,7 @@ class DataNormalize:
             ctx = mp.get_context('fork-sever')
             with ctx.Pool(jobs) as p:
                 individual_results = p.starmap(np.apply_along_axis(func1d, axis, arr, *args, **kwargs), split_arrays)
-            return np.concatenate(individual_results)
+            return np.concatenate(individual_results, axis=other_axis)
         else:
             return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
 
