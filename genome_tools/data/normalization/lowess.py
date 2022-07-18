@@ -39,7 +39,6 @@ class DataNormalize:
         self.correlation_limit = correlation_limit
         self.cv_fraction = cv_fraction
         self.scale_factor = None
-        print(jobs)
         self.jobs = mp.cpu_count() if jobs == 0 else jobs
 
     def outlier_limit(self, x):
@@ -185,7 +184,8 @@ class DataNormalize:
         masked_matrix = ma.masked_equal(matrix, 0.0, copy=False)
         return np.nanmin(masked_matrix, axis=1)
 
-    def get_peak_subset(self, ref_peaks, num_samples_per_peak: np.ndarray, density_mat, correlation_limit,
+    @staticmethod
+    def get_peak_subset(ref_peaks, num_samples_per_peak: np.ndarray, density_mat, correlation_limit,
                         min_peak_replication=0.25) -> np.ndarray:
         """
         Select a subset of peaks well correlated to a reference (mean or geometric mean)
@@ -203,9 +203,8 @@ class DataNormalize:
 
         for i in thresholds:
             over = num_samples_per_peak >= i
-            correlations = self.parallel_apply_2D(
-                spearmanr,
-                axis=0, arr=density_mat, b=ref_peaks[over])[0]
+            correlations = np.apply_along_axis(lambda x: spearmanr(x, ref_peaks[over])[0], axis=0,
+                                               arr=density_mat[over, :])
             avg_cor = np.mean(correlations)
             if avg_cor > correlation_limit:
                 break
@@ -216,8 +215,8 @@ class DataNormalize:
         return num_samples_per_peak >= i
 
     @staticmethod
-    def unpack_and_apply(x, func1d, axis, kwargs, *args):
-        return np.apply_along_axis(func1d, axis, x, *args, **kwargs)
+    def unpack_and_apply(x, func1d, kwargs, *args):
+        return func1d(x, *args, **kwargs)
 
     def parallel_apply_2D(self, func1d, axis, arr, *args, **kwargs):
         """
@@ -229,9 +228,17 @@ class DataNormalize:
             ctx = mp.get_context("forkserver")
             with ctx.Pool(jobs) as p:
                 individual_results = p.starmap(self.unpack_and_apply,
-                                               [(arr[:, index], func1d, axis, kwargs, *args) for
+                                               [(arr[:, index], func1d, kwargs, *args) for
                                                 index in range(arr.shape[other_axis])])
-            return np.concatenate(individual_results, axis=other_axis)
+
+            first_element_shape = np.shape(individual_results[0])
+            if len(first_element_shape) > 0:
+                result = np.vstack(individual_results)
+                if other_axis == 1:
+                    result = result.T
+            else:
+                result = np.array(individual_results)
+            return result
         else:
             return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
 
@@ -269,7 +276,7 @@ class DataNormalize:
         cv_set = self.seed.choice(S, size=min(cv_numer, S), replace=False)
         cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
                                                      arr=diffs[:cv_set], x=xvalues,
-                                                     sampled=sampled_peaks_mask, deta=delta))
+                                                     sampled=sampled_peaks_mask, deta=delta)[0])
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
