@@ -262,10 +262,9 @@ class DataNormalize:
         delta = np.percentile(mean_density, 99) * self.delta_fraction
         cv_set = self.seed.choice(np.arange(S), size=min(cv_numer, S), replace=False)
 
-        cv_fraction = float(
-            np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
-                                           arr=diffs[:cv_set], x=xvalues,
-                                           sampled=sampled_peaks_mask, deta=delta)))
+        cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
+                                                     arr=diffs[:cv_set], x=xvalues,
+                                                     sampled=sampled_peaks_mask, deta=delta))
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
