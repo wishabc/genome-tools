@@ -276,7 +276,7 @@ class DataNormalize:
         cv_set = self.seed.choice(S, size=min(cv_numer, S), replace=False)
         cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
                                                      arr=diffs[:, cv_set], x=xvalues,
-                                                     sampled=sampled_peaks_mask, deta=delta)[0])
+                                                     sampled=sampled_peaks_mask, delta=delta)[0])
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
