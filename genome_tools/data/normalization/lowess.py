@@ -222,7 +222,7 @@ class DataNormalize:
         jobs = min(self.jobs, arr.shape[other_axis])
         if jobs > 1:
             split_arrays = np.array_split(arr, jobs, axis=other_axis)
-
+            print([x.shape for x in split_arrays])
             ctx = mp.get_context('fork-sever')
             with ctx.Pool(jobs) as p:
                 individual_results = p.starmap(np.apply_along_axis(func1d, axis, arr, *args, **kwargs), split_arrays)
