@@ -203,8 +203,8 @@ class DataNormalize:
         for i in thresholds:
             over = num_samples_per_peak >= i
             correlations = self.parallel_apply_2D(
-                lambda x: spearmanr(ref_peaks[over], x[over]),
-                axis=0, arr=density_mat)[0]
+                spearmanr,
+                axis=0, arr=density_mat, b=ref_peaks[over])[0]
             avg_cor = np.mean(correlations)
             if avg_cor > correlation_limit:
                 break
