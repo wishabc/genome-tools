@@ -220,6 +220,7 @@ class DataNormalize:
         """
         other_axis = 1 if axis == 0 else 0
         jobs = min(self.jobs, arr.shape[other_axis])
+        print(self.jobs, arr.shape[other_axis])
         if jobs > 1:
             split_arrays = np.array_split(arr, jobs, axis=other_axis)
             print([x.shape for x in split_arrays])
