@@ -326,7 +326,7 @@ if __name__ == '__main__':
     counts_matrix = check_and_open_matrix_file(p_args.signal_matrix, dens_outpath)
     peaks_matrix = check_and_open_matrix_file(p_args.peak_matrix, peaks_outpath)
 
-    data_norm = DataNormalize()
+    data_norm = DataNormalize(jobs=p_args.jobs)
     scale_factors = data_norm.get_scale_factor(counts_matrix)
     density_matrix = counts_matrix * scale_factors
     normalizing_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
