@@ -215,6 +215,10 @@ class DataNormalize:
 
         return num_samples_per_peak >= i
 
+    @staticmethod
+    def unpack_and_apply(x, func1d, axis, kwargs, *args):
+        return np.apply_along_axis(func1d, axis, x, *args, **kwargs)
+
     def parallel_apply_2D(self, func1d, axis, arr, *args, **kwargs):
         """
         Parallel version of apply_along_axis() for 2D matrices
@@ -222,12 +226,11 @@ class DataNormalize:
         other_axis = 1 if axis == 0 else 0
         jobs = min(self.jobs, arr.shape[other_axis])
         if jobs > 1:
-            def _apply_along_axis(x):
-                return np.apply_along_axis(func1d, axis, x, *args, **kwargs)
-            split_arrays = np.array_split(arr, jobs, axis=other_axis)
             ctx = mp.get_context("forkserver")
             with ctx.Pool(jobs) as p:
-                individual_results = p.starmap(_apply_along_axis, split_arrays)
+                individual_results = p.starmap(self.unpack_and_apply,
+                                               [(arr[:, index], func1d, axis, kwargs, *args) for
+                                                index in range(arr.shape[other_axis])])
             return np.concatenate(individual_results, axis=other_axis)
         else:
             return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
