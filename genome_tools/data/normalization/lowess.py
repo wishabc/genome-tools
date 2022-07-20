@@ -45,13 +45,13 @@ class DataNormalize:
         """
         """
         if x.count() > self.sample_number:
-            subset = self.sample_masked_array(x, size=self.sample_number)
+            subset = x[self.sample_masked_array(x, size=self.sample_number)]
         else:
             subset = x
-
+        subset = subset[~subset.mask]
         fitted = expon.fit(subset)
 
-        return expon(fitted[0], fitted[1]).ppf(1 - (1 - self.peak_outlier_threshold) / x.count())
+        return expon(fitted[0], fitted[1]).isf((1 - self.peak_outlier_threshold) / x.count())
 
     def sample_masked_array(self, arr, size):
         p = ~arr.mask
