@@ -55,7 +55,7 @@ class DataNormalize:
 
     def sample_masked_array(self, arr, size):
         p = ~arr.mask
-        return self.seed.choice(np.arrange(arr.size)[p], size=int(size), replace=False)
+        return self.seed.choice(np.arange(arr.size)[p], size=int(size), replace=False)
 
     def select_peaks_uniform(self, peaks, decent_peaks_mask, ignore=None, sample_method='raw'):
         """
@@ -152,6 +152,8 @@ class DataNormalize:
 
         min_err = np.inf
         best_frac = 0
+
+        # FIXME: if delta is None case?
 
         for frac in np.arange(start, end + step, step):
             interpolated = self.fit_and_extrapolate(y, x, sampled, frac, delta)
