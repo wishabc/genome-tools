@@ -55,24 +55,22 @@ class DataNormalize:
 
     def sample_masked_array(self, arr, size):
         p = ~arr.mask
-        return self.seed.choice(np.arange(len(arr)), size=int(size),
-                                p=p / p.sum(),
-                                replace=False)
+        return self.seed.choice(len(arr), size=int(size), p=p / p.sum(), replace=False)
 
-    def select_peaks_uniform(self, peaks, decent_indices, ignore=None, sample_method='raw'):
+    def select_peaks_uniform(self, peaks, decent_peaks_mask, ignore=None, sample_method='raw'):
         """
         Returns row indices of selected peaks
         """
         if ignore is not None:
-            peaks_mask = decent_indices & ~ignore
+            peaks_mask = decent_peaks_mask & ~ignore
         else:
-            peaks_mask = decent_indices
+            peaks_mask = decent_peaks_mask
 
         masked_peaks = ma.masked_array(peaks, ~peaks_mask)
         k = min(self.sample_number, masked_peaks.count())
 
         if sample_method == 'random':
-            result = self.sample_masked_array(masked_peaks, k)
+            result_indices = self.sample_masked_array(masked_peaks, k)
         else:
             if sample_method == 'log':
                 vls = np.log(masked_peaks + 1)
@@ -89,7 +87,7 @@ class DataNormalize:
             for i in np.arange(vls.min(), vls.max(), bin_width):
                 window_min = i
                 window_max = i + bin_width
-                new_mask = ~vls.mask & ((vls >= window_min) & (vls < window_max))
+                new_mask = ~vls.mask & (vls >= window_min) & (vls < window_max)
                 window_peaks = ma.masked_where(~new_mask, vls)
 
                 if window_peaks.count() == 0:
@@ -99,10 +97,10 @@ class DataNormalize:
 
                 sampled_peaks_indicies.append(sampled_window_peaks_indicies)
 
-            result = np.unique(np.concatenate(sampled_peaks_indicies))
+            result_indices = np.unique(np.concatenate(sampled_peaks_indicies))
         # Convert to mask
         res = np.zeros(peaks.shape, dtype=bool)
-        res[result] = True
+        res[result_indices] = True
         return res
 
     @staticmethod
@@ -285,7 +283,7 @@ class DataNormalize:
                                       delta=delta, frac=cv_fraction)
 
         logger.info('Normalizing finished')
-        return np.exp(norm)
+        return density_mat / np.exp(norm)
 
     @staticmethod
     def get_scale_factor(matrix):
@@ -336,8 +334,9 @@ if __name__ == '__main__':
     data_norm = DataNormalize(jobs=p_args.jobs)
     scale_factors = data_norm.get_scale_factor(counts_matrix)
     density_matrix = counts_matrix * scale_factors
-    normalizing_matrix = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
-    r = counts_matrix / normalizing_matrix * scale_factors.mean()
+    normed = data_norm.lowess_normalize(density_mat=density_matrix, peaks_mat=peaks_matrix)
+    normed = normed / scale_factors.mean()
     logger.info('Saving results')
-    np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normalized', 'txt'), r, delimiter='\t')
-    convert_to_sparse(r, make_out_path(p_args.output, p_args.prefix, 'normalized', 'sparse'))
+    np.save(make_out_path(p_args.output, p_args.prefix, 'normed', 'numpy'), normed)
+    #np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
+    #convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
