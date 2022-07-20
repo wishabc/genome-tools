@@ -147,8 +147,8 @@ class DataNormalize:
         lo = x[sampled].min()
         hi = x[sampled].max()
 
-        within_range_indexes = (x >= lo) & (x <= hi)
-        cv_sample = within_range_indexes & ~sampled
+        within_range_indices = (x >= lo) & (x <= hi)
+        cv_sample = within_range_indices & ~sampled
 
         min_err = np.inf
         best_frac = 0
@@ -274,7 +274,7 @@ class DataNormalize:
         cv_set = self.seed.choice(S, size=min(cv_numer, S), replace=False)
         cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
                                                      arr=diffs[:, cv_set], x=xvalues,
-                                                     sampled=sampled_peaks_mask, delta=delta)[0])
+                                                     sampled=sampled_peaks_mask, delta=delta))
 
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
