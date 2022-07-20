@@ -55,7 +55,7 @@ class DataNormalize:
 
     def sample_masked_array(self, arr, size):
         p = ~arr.mask
-        return self.seed.choice(len(arr), size=int(size), p=p / p.sum(), replace=False)
+        return self.seed.choice(np.arrange(arr.size)[p], size=int(size), replace=False)
 
     def select_peaks_uniform(self, peaks, decent_peaks_mask, ignore=None, sample_method='raw'):
         """
