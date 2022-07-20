@@ -179,8 +179,8 @@ class DataNormalize:
         """
         Compute pseudocounts for each sample in the matrix
         """
-        masked_matrix = ma.masked_equal(matrix, 0.0, copy=False)
-        return np.nanmin(masked_matrix, axis=1)
+        masked_matrix = ma.masked_where(matrix <= 0.0, matrix)
+        return np.nanmin(masked_matrix, axis=0)
 
     @staticmethod
     def get_peak_subset(ref_peaks, num_samples_per_peak: np.ndarray, density_mat, correlation_limit,
@@ -256,8 +256,8 @@ class DataNormalize:
         mean_density = density_mat.mean(axis=1)
         mean_pseudocount = pseudocounts.mean()
         xvalues = np.log(mean_density + mean_pseudocount)
-        mat_and_pseudo = np.log(density_mat.transpose() + pseudocounts)
-        diffs = (mat_and_pseudo - xvalues).transpose()
+        mat_and_pseudo = np.log(density_mat + pseudocounts)
+        diffs = (mat_and_pseudo.T - xvalues).T
 
         logger.info(f'Sampling representative (well-correlated) peaks (r2>{self.correlation_limit}) to mean')
         decent_peaks_mask = self.get_peak_subset(mean_density, num_samples_per_peak, density_mat,
