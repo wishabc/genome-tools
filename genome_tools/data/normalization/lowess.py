@@ -55,7 +55,7 @@ class DataNormalize:
 
     def sample_masked_array(self, arr, size):
         p = ~arr.mask
-        return self.seed.choice(np.arrange(arr.size)[p], size=int(size), replace=False)
+        return self.seed.choice(np.arange(arr.size)[p], size=int(size), replace=False)
 
     def select_peaks_uniform(self, peaks, decent_peaks_mask, ignore=None, sample_method='raw'):
         """
@@ -179,8 +179,7 @@ class DataNormalize:
         """
         Compute pseudocounts for each sample in the matrix
         """
-        masked_matrix = ma.masked_where(matrix <= 0.0, matrix)
-        return np.nanmin(masked_matrix, axis=0)
+        return np.nanmin(ma.masked_where(matrix <= 0.0, matrix), axis=0)
 
     @staticmethod
     def get_peak_subset(ref_peaks, num_samples_per_peak: np.ndarray, density_mat, correlation_limit,
