@@ -230,8 +230,7 @@ class DataNormalize:
                                                [(arr[:, index], func1d, kwargs, *args) for
                                                 index in range(arr.shape[other_axis])])
 
-            first_element_shape = np.shape(individual_results[0])
-            if len(first_element_shape) > 0:
+            if np.ndim(individual_results) > 1:
                 result = np.vstack(individual_results)
                 if other_axis == 1:
                     result = result.T
@@ -269,7 +268,7 @@ class DataNormalize:
                                                  correlation_limit=self.correlation_limit)
         sampled_peaks_mask = self.select_peaks_uniform(mean_density, decent_peaks_mask,
                                                        sample_method=sample_method)
-
+        np.save('/home/sabramov/projects/SuperIndex/sampled_peaks.npy', sampled_peaks_mask)
         logger.info(
             f'Found {decent_peaks_mask.sum():,} well-correlated peaks, using method "{sample_method}"'
             f' and sampled {sampled_peaks_mask.sum():,} peaks')
