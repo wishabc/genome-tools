@@ -143,7 +143,8 @@ class DataNormalize:
         choose smoothing parameter for lowess by cross-validation
         sampled:
         """
-
+        if delta is None:
+            delta = self.delta_fraction * np.percentile(x, 99)
         lo = x[sampled].min()
         hi = x[sampled].max()
 
@@ -152,8 +153,6 @@ class DataNormalize:
 
         min_err = np.inf
         best_frac = 0
-
-        # FIXME: if delta is None case?
 
         for frac in np.arange(start, end + step, step):
             interpolated = self.fit_and_extrapolate(y, x, sampled, frac, delta)
@@ -273,9 +272,8 @@ class DataNormalize:
         logger.info('Computing LOWESS smoothing parameter via cross-validation')
         delta = np.percentile(mean_density, 99) * self.delta_fraction
         cv_set = self.seed.choice(S, size=min(cv_number, S), replace=False)
-        cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
-                                                     arr=diffs[:, cv_set], x=xvalues,
-                                                     sampled=sampled_peaks_mask, delta=delta))
+        cv_fraction = np.mean([self.choose_fraction_cv(diffs[:, i], xvalues,
+                                                       sampled=sampled_peaks_mask, delta=delta) for i in cv_set])
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
         norm = self.parallel_apply_2D(self.fit_and_extrapolate, axis=0,
@@ -338,5 +336,5 @@ if __name__ == '__main__':
     normed = normed / scale_factors.mean()
     logger.info('Saving results')
     np.save(make_out_path(p_args.output, p_args.prefix, 'normed', 'numpy'), normed)
-    #np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
-    #convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
+    # np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
+    # convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
