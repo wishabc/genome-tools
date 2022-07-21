@@ -247,18 +247,22 @@ class DataNormalize:
         Uses only well-correlated peaks to perform normalization
         """
         N, S = density_mat.shape
-        assert density_mat.shape == peaks_mat.shape
-        logger.info(f'Normalizing matrix with shape: {N:,};{S}')
-        num_samples_per_peak = self.get_num_samples_per_peak(peaks_mat)
-
-        logger.info('Computing mean and pseudocounts for each peak')
-        pseudocounts = self.get_pseudocounts(density_mat)
-
-        mean_density = density_mat.mean(axis=1)
-        mean_pseudocount = pseudocounts.mean()
-        xvalues = np.log(mean_density + mean_pseudocount)
-        mat_and_pseudo = np.log(density_mat + pseudocounts)
-        diffs = (mat_and_pseudo.T - xvalues).T
+        # assert density_mat.shape == peaks_mat.shape
+        # logger.info(f'Normalizing matrix with shape: {N:,};{S}')
+        # num_samples_per_peak = self.get_num_samples_per_peak(peaks_mat)
+        #
+        # logger.info('Computing mean and pseudocounts for each peak')
+        # pseudocounts = self.get_pseudocounts(density_mat)
+        #
+        # mean_density = density_mat.mean(axis=1)
+        # mean_pseudocount = pseudocounts.mean()
+        # xvalues = np.log(mean_density + mean_pseudocount)
+        # mat_and_pseudo = np.log(density_mat + pseudocounts)
+        # diffs = (mat_and_pseudo.T - xvalues).T
+        xvalues = np.load('/home/sabramov/projects/SuperIndex/xvalues.npy')
+        diffs = np.load('/home/sabramov/projects/SuperIndex/diffs.npy')
+        num_samples_per_peak = np.load('/home/sabramov/projects/SuperIndex/num_samples_per_peak.npy')
+        mean_density = np.load('/home/sabramov/projects/SuperIndex/mean_density.npy')
 
         logger.info(f'Sampling representative (well-correlated) peaks (r2>{self.correlation_limit}) to mean')
         decent_peaks_mask = self.get_peak_subset(mean_density, num_samples_per_peak, density_mat,
