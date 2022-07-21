@@ -159,7 +159,7 @@ class DataNormalize:
             if np.isnan(interpolated.max()):
                 err = np.inf
             else:
-                err = np.power(interpolated[cv_sample] - y[cv_sample], 2).mean()
+                err = np.square(interpolated[cv_sample] - y[cv_sample]).mean()
 
             if err < min_err:
                 min_err = err
@@ -239,7 +239,7 @@ class DataNormalize:
         else:
             return np.apply_along_axis(func1d, axis, arr, *args, **kwargs)
 
-    def lowess_normalize(self, density_mat: np.ndarray, peaks_mat: np.ndarray, cv_numer: int = 5, sample_method='raw'):
+    def lowess_normalize(self, density_mat: np.ndarray, peaks_mat: np.ndarray, cv_number: int = 5, sample_method='raw'):
         """
         Normalizes to the mean of of the dataset
         Uses only well-correlated peaks to perform normalization
@@ -270,11 +270,10 @@ class DataNormalize:
 
         logger.info('Computing LOWESS smoothing parameter via cross-validation')
         delta = np.percentile(mean_density, 99) * self.delta_fraction
-        # cv_set = self.seed.choice(S, size=min(cv_numer, S), replace=False)
-        # cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
-        #                                              arr=diffs[:, cv_set], x=xvalues,
-        #                                              sampled=sampled_peaks_mask, delta=delta))
-        cv_fraction = 0.48
+        cv_set = self.seed.choice(S, size=min(cv_number, S), replace=False)
+        cv_fraction = np.mean(self.parallel_apply_2D(self.choose_fraction_cv, axis=0,
+                                                     arr=diffs[:, cv_set], x=xvalues,
+                                                     sampled=sampled_peaks_mask, delta=delta))
         logger.info(f'Computing LOWESS on all the data with params - delta = {delta}, frac = {cv_fraction}')
 
         norm = self.parallel_apply_2D(self.fit_and_extrapolate, axis=0,
