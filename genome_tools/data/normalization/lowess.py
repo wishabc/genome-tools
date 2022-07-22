@@ -338,5 +338,5 @@ if __name__ == '__main__':
     normed = normed / scale_factors.mean()
     logger.info('Saving results')
     np.save(make_out_path(p_args.output, p_args.prefix, 'normed', 'numpy'), normed)
-    np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
+    np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t')
     convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
