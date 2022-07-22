@@ -26,7 +26,7 @@ class DataNormalize:
                  correlation_limit=0.8,
                  cv_fraction=0.33,
                  seed_number=1832245,
-                 sample_number=75000,
+                 sample_number=75_000,
                  bin_number=100,
                  jobs=1,
                  ):
@@ -128,7 +128,8 @@ class DataNormalize:
     def get_extrapolation(self, x, lowess_est, sampled):
         """
         """
-        interpolated = np.interp(x, x[sampled], lowess_est)
+        sort_ind = np.argsort(x[sampled])
+        interpolated = np.interp(x, x[sampled][sort_ind], lowess_est[sort_ind])
         extrapolated = self.extrapolate(interpolated, x, x[sampled], lowess_est)
         return extrapolated
 
@@ -153,7 +154,8 @@ class DataNormalize:
         min_err = np.inf
         best_frac = 0
 
-        # FIXME: if delta is None case?
+        if delta is None:
+            delta = self.delta_fraction * np.percentile(x, 99)
 
         for frac in np.arange(start, end + step, step):
             interpolated = self.fit_and_extrapolate(y, x, sampled, frac, delta)
@@ -246,29 +248,23 @@ class DataNormalize:
         Uses only well-correlated peaks to perform normalization
         """
         N, S = density_mat.shape
-        # assert density_mat.shape == peaks_mat.shape
-        # logger.info(f'Normalizing matrix with shape: {N:,};{S}')
-        # num_samples_per_peak = self.get_num_samples_per_peak(peaks_mat)
-        #
-        # logger.info('Computing mean and pseudocounts for each peak')
-        # pseudocounts = self.get_pseudocounts(density_mat)
-        #
-        # mean_density = density_mat.mean(axis=1)
-        # mean_pseudocount = pseudocounts.mean()
-        # xvalues = np.log(mean_density + mean_pseudocount)
-        # mat_and_pseudo = np.log(density_mat + pseudocounts)
-        # diffs = (mat_and_pseudo.T - xvalues).T
-        xvalues = np.load('/home/sabramov/projects/SuperIndex/xvalues.npy')
-        diffs = np.load('/home/sabramov/projects/SuperIndex/diffs.npy')
-        num_samples_per_peak = np.load('/home/sabramov/projects/SuperIndex/num_samples_per_peak.npy')
-        mean_density = np.load('/home/sabramov/projects/SuperIndex/mean_density.npy')
+        assert density_mat.shape == peaks_mat.shape
+        logger.info(f'Normalizing matrix with shape: {N:,};{S}')
+        num_samples_per_peak = self.get_num_samples_per_peak(peaks_mat)
 
+        logger.info('Computing mean and pseudocounts for each peak')
+        pseudocounts = self.get_pseudocounts(density_mat)
+
+        mean_density = density_mat.mean(axis=1)
+        mean_pseudocount = pseudocounts.mean()
+        xvalues = np.log(mean_density + mean_pseudocount)
+        mat_and_pseudo = np.log(density_mat + pseudocounts)
+        diffs = (mat_and_pseudo.T - xvalues).T
         logger.info(f'Sampling representative (well-correlated) peaks (r2>{self.correlation_limit}) to mean')
         decent_peaks_mask = self.get_peak_subset(mean_density, num_samples_per_peak, density_mat,
                                                  correlation_limit=self.correlation_limit)
         sampled_peaks_mask = self.select_peaks_uniform(mean_density, decent_peaks_mask,
                                                        sample_method=sample_method)
-        np.save('/home/sabramov/projects/SuperIndex/sampled_peaks.npy', sampled_peaks_mask)
         logger.info(
             f'Found {decent_peaks_mask.sum():,} well-correlated peaks, using method "{sample_method}"'
             f' and sampled {sampled_peaks_mask.sum():,} peaks')
@@ -327,7 +323,8 @@ if __name__ == '__main__':
                         help='Number of jobs to parallelize calculations '
                              '(can\'t be larger than number of samples. If 0 is provided - uses all available cores')
     p_args = parser.parse_args()
-
+    if not os.path.exists(p_args.output):
+        os.mkdir(p_args.output)
     dens_outpath = make_out_path(p_args.output, p_args.prefix, 'signal', 'numpy')
     peaks_outpath = make_out_path(p_args.output, p_args.prefix, 'bin', 'numpy')
 
@@ -341,5 +338,5 @@ if __name__ == '__main__':
     normed = normed / scale_factors.mean()
     logger.info('Saving results')
     np.save(make_out_path(p_args.output, p_args.prefix, 'normed', 'numpy'), normed)
-    #np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
-    #convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
+    np.savetxt(make_out_path(p_args.output, p_args.prefix, 'normed', 'txt'), normed, delimiter='\t', format="%0.4f")
+    convert_to_sparse(normed, make_out_path(p_args.output, p_args.prefix, 'normed', 'sparse'))
