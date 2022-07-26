@@ -114,8 +114,8 @@ class DataNormalize:
         min_value = np.min(base)
         max_value = np.max(base)
 
-        under_min = np.where(to_extrap < min_value)[0]
-        over_max = np.where(to_extrap > max_value)[0]
+        under_min = to_extrap < min_value
+        over_max = to_extrap > max_value
 
         min_predict = predict[sample_order[0]]
         max_predict = predict[sample_order[-1]]
