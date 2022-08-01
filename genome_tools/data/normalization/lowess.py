@@ -92,10 +92,10 @@ class DataNormalize:
 
                 if window_peaks.count() == 0:
                     continue
-                sampled_window_peaks_indicies = self.sample_masked_array(window_peaks,
-                                                                         size=min(bin_size, window_peaks.count()))
+                sampled_window_peaks_indices = self.sample_masked_array(window_peaks,
+                                                                        size=min(bin_size, window_peaks.count()))
 
-                sampled_peaks_indicies.append(sampled_window_peaks_indicies)
+                sampled_peaks_indicies.append(sampled_window_peaks_indices)
 
             result_indices = np.unique(np.concatenate(sampled_peaks_indicies))
         # Convert to mask
@@ -210,7 +210,7 @@ class DataNormalize:
             if avg_cor > correlation_limit:
                 break
 
-        if i == n:
+        if i > n:
             logger.warning('Caution: individual samples may be poorly captured by mean!')
 
         return num_samples_per_peak >= i
