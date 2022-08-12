@@ -296,7 +296,7 @@ def check_and_open_matrix_file(path, outpath):
     if ext == '.npy':
         return np.load(path)
     else:
-        np_arr = dt.fread(path, sep='\t', header=False, fill=True).to_numpy()
+        np_arr = dt.fread(path, sep='\t', header=False).to_numpy()
         np.save(outpath, np_arr)
         return np_arr
 
